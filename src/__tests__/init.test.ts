@@ -59,6 +59,7 @@ const baseAnswers: Answers = {
   agendaUrl: '',
   agendaToken: '',
   agendaWorkspaceId: '',
+  agendaLabel: '',
   agendaPendingStatus: '',
   agendaInReviewStatus: '',
   mondayApiToken: '',
@@ -445,6 +446,7 @@ function answersFromParsed(p: Record<string, string>, folderName = 'myproject'):
     agendaUrl: p.AGENDA_URL || 'http://127.0.0.1:7420',
     agendaToken: p.AGENDA_TOKEN || '',
     agendaWorkspaceId: p.AGENDA_WORKSPACE_ID || '',
+    agendaLabel: p.AGENDA_LABEL || '*',
     agendaPendingStatus: p.AGENDA_PENDING_STATUS || 'Pending',
     agendaInReviewStatus: p.AGENDA_IN_REVIEW_STATUS || 'In Review',
     mondayApiToken: p.MONDAY_API_TOKEN || '',
@@ -1152,6 +1154,7 @@ describe('renderEnv AGenda provider', () => {
       agendaUrl: 'http://127.0.0.1:7420',
       agendaToken: 'ag_secret',
       agendaWorkspaceId: 'SendFax',
+      agendaLabel: '*',
       agendaPendingStatus: 'Pending',
       agendaInReviewStatus: 'In Review',
     };

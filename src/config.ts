@@ -289,6 +289,7 @@ export function loadConfig(customEnvPath?: string): Config {
     agendaUrl: process.env.AGENDA_URL || 'http://127.0.0.1:7420',
     agendaToken: process.env.AGENDA_TOKEN || '',
     agendaWorkspaceId: process.env.AGENDA_WORKSPACE_ID || '',
+    agendaLabel: process.env.AGENDA_LABEL || '*',
     agendaPendingStatus: process.env.AGENDA_PENDING_STATUS || 'Pending',
     agendaInReviewStatus: process.env.AGENDA_IN_REVIEW_STATUS || 'In Review',
     mondayApiToken: process.env.MONDAY_API_TOKEN || '',

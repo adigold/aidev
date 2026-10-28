@@ -9,6 +9,8 @@ import { ClickUpProvider, getBlockedByFromClickUpDependencies } from '../provide
 import { JiraProvider } from '../providers/jira';
 import { LinearProvider, getBlockedByFromLinearRelations } from '../providers/linear';
 import { AgendaProvider, getBlockedByFromAgendaRelations, mapAgendaJobStatus } from '../providers/agenda';
+import { checkImplementationStillActive } from '../statusWatch';
+import { buildConsultProviderConfig, buildNonCodeProviderConfig } from '../providerViews';
 import { MondayProvider, getBlockedByFromMondayColumnValues, getTagsFromMondayColumnValues } from '../providers/monday';
 import { NotionProvider } from '../providers/notion';
 import { TrelloProvider } from '../providers/trello';
@@ -3029,5 +3031,137 @@ describe('AgendaProvider.createTask', () => {
     const create = calls.find((c) => c.method === 'POST' && c.path === '/api/issues');
     assert.ok(create);
     assert.deepEqual(create.body, { team_id: AGENDA_TEAM, title: 'Sub task', description: 'Do it', priority: 3, labels: ['planning'] });
+  });
+});
+
+describe('AgendaProvider — project tag through a whole run (Pi regression)', () => {
+  afterEach(() => mock.restoreAll());
+
+  // What the Pi ran: PROVIDER=agenda in the blockhub.dev clone, default
+  // AGENDA_LABEL=*, CLICKUP_TAG defaulting to the folder name.
+  const piConfig = {
+    ...baseAgendaConfig,
+    provider: 'agenda',
+    clickupTag: 'blockhub.dev',
+    agendaLabel: '*',
+    nonCodeTag: 'blockhub.dev-other',
+    consultTag: 'blockhub.dev-consult',
+  } as unknown as Config;
+
+  function bhIssue(labels: string[] = []) {
+    return agendaIssue({
+      id: 'issue-44',
+      identifier: 'BH-44',
+      title: 'Improve the GitHub readme.',
+      description: 'Make the readme useful.',
+      label_ids: labels,
+    });
+  }
+
+  function bhJob(overrides: Record<string, unknown> = {}) {
+    return agendaJob({
+      id: 'job-44',
+      issue_id: 'issue-44',
+      identifier: 'BH-44',
+      issue_title: 'Improve the GitHub readme.',
+      requested_text: '@aidev and add all the links',
+      ...overrides,
+    });
+  }
+
+  it('list queued -> claim -> re-poll during the run keeps status "in progress" and the project tag', async () => {
+    const job = bhJob();
+    mockAgenda({ jobs: [job], issue: bhIssue() });
+    const provider = new AgendaProvider(piConfig);
+
+    const listed = await provider.fetchTasks();
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].status, 'open');
+    assert.deepEqual(listed[0].tags, ['blockhub.dev'], 'picked-up task carries the project tag');
+
+    await provider.updateStatus('BH-44', 'in progress');
+    assert.equal(job.status, 'running');
+
+    // The status watcher re-reads the task every few seconds while the agent runs.
+    for (let poll = 0; poll < 3; poll++) {
+      const again = await provider.fetchTaskById('BH-44');
+      assert.ok(again);
+      assert.equal(again.status, 'in progress');
+      assert.deepEqual(again.tags, ['blockhub.dev']);
+      const check = await checkImplementationStillActive(provider, 'BH-44', piConfig, 'code');
+      assert.deepEqual(check, { active: true });
+    }
+  });
+
+  it('a job that was already claimed by this dispatcher is still found and active (not only queued)', async () => {
+    mockAgenda({ jobs: [bhJob({ status: 'claimed', claimed_by: 'aidev@pi' })], issue: bhIssue() });
+    const provider = new AgendaProvider(piConfig);
+    const task = await provider.fetchTaskById('BH-44');
+    assert.ok(task);
+    assert.equal(task.status, 'in progress');
+    assert.deepEqual(task.tags, ['blockhub.dev']);
+    assert.deepEqual(await checkImplementationStillActive(provider, 'BH-44', piConfig), { active: true });
+  });
+
+  it('a job canceled in AGenda during the run makes the status check stop the run', async () => {
+    const job = bhJob();
+    mockAgenda({ jobs: [job], issue: bhIssue() });
+    const provider = new AgendaProvider(piConfig);
+    await provider.fetchTasks();
+    await provider.updateStatus('BH-44', 'in progress');
+    job.status = 'canceled';
+    const task = await provider.fetchTaskById('BH-44');
+    assert.ok(task);
+    assert.equal(task.status, 'cancelled');
+    const check = await checkImplementationStillActive(provider, 'BH-44', piConfig);
+    assert.equal(check.active, false);
+  });
+
+  it('a job that ended before this process started does not shadow the issue state', async () => {
+    mockAgenda({ jobs: [bhJob({ status: 'canceled' })], issue: bhIssue() });
+    const provider = new AgendaProvider(piConfig);
+    const task = await provider.fetchTaskById('BH-44');
+    assert.ok(task);
+    assert.equal(task.status, 'Todo');
+  });
+
+  it('is not listed as non-code or consult unless the issue carries that label', async () => {
+    mockAgenda({ jobs: [bhJob()], issue: bhIssue() });
+    const nonCode = new AgendaProvider(buildNonCodeProviderConfig(piConfig));
+    const consult = new AgendaProvider(buildConsultProviderConfig(piConfig));
+    assert.deepEqual(await nonCode.fetchTasks(), []);
+    assert.deepEqual(await consult.fetchTasks(), []);
+  });
+
+  it('lists a job as non-code when its issue carries the non-code label', async () => {
+    mock.restoreAll();
+    mock.method(globalThis, 'fetch', async (url: string | URL | Request) => {
+      const u = new URL(String(url));
+      if (u.pathname === '/api/bootstrap') {
+        const b = agendaBootstrap();
+        b.labels.push({ id: 'l-other', name: 'blockhub.dev-other' });
+        return jsonResponse(b);
+      }
+      if (u.pathname === '/api/aidev/jobs') return jsonResponse({ items: [bhJob()] });
+      if (u.pathname === '/api/issues/BH-44') return jsonResponse(bhIssue(['l-other']));
+      return jsonResponse({ items: [] });
+    });
+    const nonCode = new AgendaProvider(buildNonCodeProviderConfig(piConfig));
+    const tasks = await nonCode.fetchTasks();
+    assert.equal(tasks.length, 1);
+    assert.deepEqual(tasks[0].tags, ['blockhub.dev-other']);
+    const code = new AgendaProvider(piConfig);
+    const codeTasks = await code.fetchTasks();
+    assert.deepEqual(codeTasks[0].tags, ['blockhub.dev-other', 'blockhub.dev'], 'wildcard main view adds the project tag');
+  });
+
+  it('AGENDA_LABEL filters jobs by issue label, like LINEAR_LABEL', async () => {
+    mockAgenda({ jobs: [bhJob()], issue: bhIssue(['l-accepted']) });
+    const filtered = new AgendaProvider({ ...piConfig, agendaLabel: 'readme' } as unknown as Config);
+    assert.deepEqual(await filtered.fetchTasks(), []);
+    const matching = new AgendaProvider({ ...piConfig, agendaLabel: 'accepted' } as unknown as Config);
+    const tasks = await matching.fetchTasks();
+    assert.equal(tasks.length, 1);
+    assert.deepEqual(tasks[0].tags, ['accepted']);
   });
 });

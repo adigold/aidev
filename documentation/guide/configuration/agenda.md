@@ -7,6 +7,7 @@ AGenda is a self-hosted issue tracker with an `@aidev` job queue: when the owner
 | `AGENDA_URL` | `http://127.0.0.1:7420` | Base URL of the AGenda server |
 | `AGENDA_TOKEN` | required | AGenda API key with the `dispatcher` role |
 | `AGENDA_WORKSPACE_ID` | required | Workspace id, or its exact name |
+| `AGENDA_LABEL` | `*` | Only jobs whose issue carries this label (same idea as `LINEAR_LABEL`); `*` takes every `@aidev` job of the workspace |
 | `AGENDA_PENDING_STATUS` | `Pending` | Status aidev writes when it asks a question |
 | `AGENDA_IN_REVIEW_STATUS` | `In Review` | Status aidev writes after implementation; also the workflow state it reads for the review phase |
 
@@ -19,7 +20,9 @@ AGenda is a self-hosted issue tracker with an `@aidev` job queue: when the owner
 | `claimed` / `running` | issue identifier | `in progress` |
 | `needs_input` (waiting for the owner) | issue identifier | `needs input` (skipped) |
 
-The task description is the issue description; when the job was triggered from a comment, the comment text is appended as the request. Issue labels become task tags. Comments are read from and written to the issue's own comments.
+The task description is the issue description; when the job was triggered from a comment, the comment text is appended as the request. Issue labels become task tags. Because an `@aidev` job is already an assignment to this project, every task also carries the project tag (`AGENDA_LABEL`, or `CLICKUP_TAG` / the folder name when the label is `*`), so aidev's tag checks during a run match the task it picked up. Non-code and consult tasks are only those whose issue carries `NON_CODE_TAG` or `CONSULT_TAG` as a label. Comments are read from and written to the issue's own comments.
+
+While an agent runs, aidev re-reads the task every few seconds: a claimed or running job keeps answering with the same task (`in progress`, same tags). If the job is canceled in AGenda during the run, the task reads `cancelled` and the run stops.
 
 ## How status changes are written
 

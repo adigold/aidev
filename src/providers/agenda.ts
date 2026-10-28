@@ -2,6 +2,7 @@ import * as os from 'node:os';
 import { Task, Comment, Config, CreateTaskParams, CreateTaskResult, FetchTasksOptions } from '../types';
 import { TaskProvider } from './base';
 import { logger } from '../logger';
+import { taskMatchesTag } from '../providerViews';
 
 /**
  * AGenda provider.
@@ -17,6 +18,12 @@ import { logger } from '../logger';
  *   server send its own notifications. Any other status name is written to the
  *   issue's workflow state, exactly like Linear.
  * - `postComment()` / `getComments()` use the issue's comment endpoints.
+ *
+ * Tags are the issue's labels. `AGENDA_LABEL` filters jobs by label like
+ * `LINEAR_LABEL`; with the default `*` every @aidev job of the workspace is
+ * this project's work, and the provider marks each task with the project tag
+ * (`CLICKUP_TAG`, default: folder name) so aidev's tag checks during a run
+ * see the same task it picked up.
  */
 
 const DEFAULT_URL = 'http://127.0.0.1:7420';
@@ -181,6 +188,12 @@ export class AgendaProvider implements TaskProvider {
   private inReviewStatus: string;
   private commentPrefix: string;
   private claimedBy: string;
+  /** Label filter (`*` = every job of the workspace). */
+  private label: string;
+  /** Tag every listed task carries so the run loop's tag checks match. */
+  private projectTag: string;
+  /** Jobs this provider claimed or reported on, by issue identifier. */
+  private workingJobs = new Map<string, string>();
 
   constructor(config: Config) {
     this.baseUrl = (config.agendaUrl || DEFAULT_URL).replace(/\/+$/, '');
@@ -190,6 +203,19 @@ export class AgendaProvider implements TaskProvider {
     this.inReviewStatus = config.agendaInReviewStatus || 'In Review';
     this.commentPrefix = config.commentPrefix || '[aidev]';
     this.claimedBy = `aidev@${os.hostname()}`;
+    this.label = (config.agendaLabel || '*').trim() || '*';
+    this.projectTag = this.label !== '*' ? this.label : (config.clickupTag || '').trim();
+  }
+
+  private matchesLabel(tags: string[]): boolean {
+    return taskMatchesTag(tags, this.label);
+  }
+
+  /** Issue labels plus the project tag (an @aidev job is this project's assignment). */
+  private withProjectTag(tags: string[]): string[] {
+    if (!this.projectTag || this.projectTag === '*') return tags;
+    const want = this.projectTag.toLowerCase();
+    return tags.some((t) => t.toLowerCase() === want) ? tags : [...tags, this.projectTag];
   }
 
   // ── HTTP ────────────────────────────────────────────────────────────────
@@ -306,12 +332,20 @@ export class AgendaProvider implements TaskProvider {
     return states.find((s) => s.id === stateId)?.name ?? stateId;
   }
 
+  /**
+   * Maps an issue to a task. With `applyLabelFilter`, returns null when the
+   * issue's own labels do not match `AGENDA_LABEL` (the filter looks at the
+   * real labels, before the project tag is added).
+   */
   private async mapIssue(
     issue: AgendaIssueDetail | AgendaIssue,
     status: string,
     ws: string,
     omitDescription: boolean,
-  ): Promise<Task> {
+    applyLabelFilter = false,
+  ): Promise<Task | null> {
+    const labels = await this.labelNames(issue.label_ids);
+    if (applyLabelFilter && !this.matchesLabel(labels)) return null;
     const relations = (issue as AgendaIssueDetail).relations;
     const blockedBy = getBlockedByFromAgendaRelations(relations);
     return {
@@ -320,14 +354,14 @@ export class AgendaProvider implements TaskProvider {
       description: omitDescription ? '' : issue.description || '',
       status,
       url: this.issueUrl(issue.identifier),
-      tags: await this.labelNames(issue.label_ids),
+      tags: this.withProjectTag(labels),
       priority: typeof issue.priority === 'number' ? issue.priority : undefined,
       sourceListId: ws,
       ...(blockedBy.length > 0 ? { blockedBy } : {}),
     };
   }
 
-  private async mapJob(job: AgendaJob, ws: string, omitDescription: boolean): Promise<Task> {
+  private async mapJob(job: AgendaJob, ws: string, omitDescription: boolean, applyLabelFilter = false): Promise<Task | null> {
     const identifier = job.identifier ?? job.issue_id;
     const status = mapAgendaJobStatus(job, this.pendingStatus);
     let detail: AgendaIssueDetail | null = null;
@@ -337,17 +371,19 @@ export class AgendaProvider implements TaskProvider {
       logger.warn(`AGenda: could not load issue ${identifier} for job ${job.id}: ${err instanceof Error ? err.message : err}`);
     }
     if (!detail) {
+      if (applyLabelFilter && !this.matchesLabel([])) return null;
       return {
         id: identifier,
         name: job.issue_title ?? identifier,
         description: omitDescription ? '' : job.requested_text || '',
         status,
         url: this.issueUrl(identifier),
-        tags: [],
+        tags: this.withProjectTag([]),
         sourceListId: ws,
       };
     }
-    const task = await this.mapIssue(detail, status, ws, omitDescription);
+    const task = await this.mapIssue(detail, status, ws, omitDescription, applyLabelFilter);
+    if (!task) return null;
     if (!omitDescription) {
       // Jobs triggered from a comment carry the actual request in requested_text.
       const request = (job.requested_text || '').trim();
@@ -370,7 +406,8 @@ export class AgendaProvider implements TaskProvider {
     }
     const tasks: Task[] = [];
     for (const job of jobs) {
-      tasks.push(await this.mapJob(job, ws, Boolean(options?.omitDescription)));
+      const task = await this.mapJob(job, ws, Boolean(options?.omitDescription), true);
+      if (task) tasks.push(task);
     }
     return tasks;
   }
@@ -384,9 +421,21 @@ export class AgendaProvider implements TaskProvider {
       if (err instanceof Error && /AGenda API error 404/.test(err.message)) return null;
       throw err;
     }
-    const jobs = await this.fetchJobs(AGENDA_OPEN_JOB_STATUSES, detail.identifier);
-    if (jobs.length) {
-      return this.mapJob(jobs[jobs.length - 1], ws, Boolean(options?.omitDescription));
+    const jobs = await this.fetchJobs([], detail.identifier);
+    const open = jobs.filter((j) => AGENDA_OPEN_JOB_STATUSES.includes(j.status));
+    if (open.length) {
+      // A claimed / running job keeps reporting the same task (status "in
+      // progress", same tags) for the whole run; the watcher re-reads it every
+      // few seconds.
+      return this.mapJob(open[open.length - 1], ws, Boolean(options?.omitDescription));
+    }
+    // The job this provider was working on ended outside aidev (canceled in
+    // AGenda, or failed): report that so the run stops instead of reading the
+    // issue's workflow state, which may still look active.
+    const workingId = this.workingJobs.get(detail.identifier);
+    const working = workingId ? jobs.find((j) => j.id === workingId) : undefined;
+    if (working && working.status !== 'done') {
+      return this.mapJob(working, ws, Boolean(options?.omitDescription));
     }
     const status = await this.stateName(detail.state_id);
     return this.mapIssue(detail, status, ws, Boolean(options?.omitDescription));
@@ -407,7 +456,8 @@ export class AgendaProvider implements TaskProvider {
     const data = await this.request<{ items: AgendaIssue[] }>('GET', `/api/issues?${params.toString()}`);
     const tasks: Task[] = [];
     for (const issue of data.items ?? []) {
-      tasks.push(await this.mapIssue(issue, await this.stateName(issue.state_id), ws, true));
+      const task = await this.mapIssue(issue, await this.stateName(issue.state_id), ws, true, true);
+      if (task) tasks.push(task);
     }
     return tasks;
   }
@@ -521,16 +571,19 @@ export class AgendaProvider implements TaskProvider {
     if (job) {
       if (key === 'in progress') {
         const claimed = await this.ensureClaimed(job);
+        this.workingJobs.set(taskId, claimed.id);
         if (claimed.status !== 'running') await this.report(claimed.id, { status: 'running' });
         return;
       }
       if (key === this.pendingStatus.toLowerCase()) {
         const claimed = await this.ensureClaimed(job);
+        this.workingJobs.delete(taskId);
         if (claimed.status !== 'needs_input') await this.report(claimed.id, { status: 'needs_input' });
         return;
       }
       if (key === this.inReviewStatus.toLowerCase()) {
         const claimed = await this.ensureClaimed(job);
+        this.workingJobs.delete(taskId);
         await this.report(claimed.id, { status: 'done' });
         return;
       }

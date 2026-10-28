@@ -14,6 +14,7 @@ export function applyTaskTagToProviderConfig(config: Config, tag: string): Confi
     clickupTag: tag,
     jiraLabel: tag,
     linearLabel: tag,
+    agendaLabel: tag,
     trelloLabel: tag,
   };
 }

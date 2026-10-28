@@ -198,6 +198,7 @@ export interface Answers {
   agendaUrl: string;
   agendaToken: string;
   agendaWorkspaceId: string;
+  agendaLabel: string;
   agendaPendingStatus: string;
   agendaInReviewStatus: string;
   // Monday
@@ -400,6 +401,7 @@ export function renderEnv(a: Answers): string {
               line('AGENDA_URL', a.agendaUrl),
               line('AGENDA_TOKEN', a.agendaToken),
               line('AGENDA_WORKSPACE_ID', a.agendaWorkspaceId),
+              line('AGENDA_LABEL', a.agendaLabel),
               `AGENDA_PENDING_STATUS=${envVal(a.agendaPendingStatus)}`,
               `AGENDA_IN_REVIEW_STATUS=${envVal(a.agendaInReviewStatus)}`,
             ]
@@ -661,6 +663,7 @@ export async function initCommand(): Promise<void> {
     let agendaUrl = '';
     let agendaToken = '';
     let agendaWorkspaceId = '';
+    let agendaLabel = '*';
     let agendaPendingStatus = 'Pending';
     let agendaInReviewStatus = 'In Review';
 
@@ -725,6 +728,11 @@ export async function initCommand(): Promise<void> {
         `Workspace ${hint('workspace id or exact workspace name; one project per workspace')}`,
         existing.AGENDA_WORKSPACE_ID || '',
         true
+      );
+      agendaLabel = await ask(
+        rl,
+        `Label to filter jobs ${hint('* = every @aidev job in the workspace')}`,
+        existing.AGENDA_LABEL || '*'
       );
       agendaPendingStatus = await ask(rl, 'Pending status name', existing.AGENDA_PENDING_STATUS || 'Pending');
       agendaInReviewStatus = await ask(rl, 'In-review status name', existing.AGENDA_IN_REVIEW_STATUS || 'In Review');
@@ -1127,6 +1135,7 @@ export async function initCommand(): Promise<void> {
       agendaUrl,
       agendaToken,
       agendaWorkspaceId,
+      agendaLabel,
       agendaPendingStatus,
       agendaInReviewStatus,
       mondayApiToken,

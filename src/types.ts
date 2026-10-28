@@ -111,6 +111,7 @@ export interface Config {
   agendaUrl: string;
   agendaToken: string;
   agendaWorkspaceId: string;
+  agendaLabel: string;
   agendaPendingStatus: string;
   agendaInReviewStatus: string;
   // Monday
