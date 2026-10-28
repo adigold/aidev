@@ -33,3 +33,18 @@ describe('taskStatus', () => {
     assert.equal(isActiveImplementationStatus('review', config), false);
   });
 });
+
+describe('taskStatus — agenda provider', () => {
+  it('uses the AGenda pending / in-review statuses and "open" for open', () => {
+    const config = makeConfig({
+      provider: 'agenda',
+      agendaPendingStatus: 'Pending',
+      agendaInReviewStatus: 'In Review',
+    });
+    assert.equal(getOpenStatus(config), 'open');
+    assert.equal(getPendingStatus(config), 'Pending');
+    assert.equal(getInProgressStatus(config), 'in progress');
+    assert.equal(isActiveImplementationStatus('Pending', config), true);
+    assert.equal(isActiveImplementationStatus('needs input', config), false);
+  });
+});

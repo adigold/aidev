@@ -107,6 +107,12 @@ export interface Config {
   linearLabel: string;
   linearPendingStatus: string;
   linearInReviewStatus: string;
+  // AGenda
+  agendaUrl: string;
+  agendaToken: string;
+  agendaWorkspaceId: string;
+  agendaPendingStatus: string;
+  agendaInReviewStatus: string;
   // Monday
   mondayApiToken: string;
   mondayBoardId: string;

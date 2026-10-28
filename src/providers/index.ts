@@ -1,5 +1,6 @@
 import { Config } from '../types';
 import { TaskProvider } from './base';
+import { AgendaProvider } from './agenda';
 import { ClickUpProvider } from './clickup';
 import { JiraProvider } from './jira';
 import { LinearProvider } from './linear';
@@ -10,6 +11,8 @@ import { TrelloProvider } from './trello';
 
 export function createProvider(config: Config, mode?: TaskMode): TaskProvider {
   switch (config.provider.toLowerCase()) {
+    case 'agenda':
+      return new AgendaProvider(config);
     case 'clickup':
       return new ClickUpProvider(config);
     case 'jira':

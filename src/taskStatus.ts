@@ -2,6 +2,7 @@ import { Config } from './types';
 
 export function getPendingStatus(config: Config): string {
   const p = (config.provider || 'clickup').toLowerCase();
+  if (p === 'agenda') return config.agendaPendingStatus;
   if (p === 'jira') return config.jiraPendingStatus;
   if (p === 'linear') return config.linearPendingStatus;
   if (p === 'notion') return config.notionPendingStatus;
@@ -11,6 +12,7 @@ export function getPendingStatus(config: Config): string {
 
 export function getOpenStatus(config: Config): string {
   const p = (config.provider || 'clickup').toLowerCase();
+  if (p === 'agenda') return 'open';
   if (p === 'jira') return 'open';
   if (p === 'linear') return 'open';
   if (p === 'trello') return config.trelloOpenStatus || 'open';
@@ -24,6 +26,7 @@ export function getInProgressStatus(_config: Config): string {
 
 export function getInReviewStatus(config: Config): string {
   const p = (config.provider || 'clickup').toLowerCase();
+  if (p === 'agenda') return config.agendaInReviewStatus;
   if (p === 'jira') return config.jiraInReviewStatus;
   if (p === 'linear') return config.linearInReviewStatus;
   if (p === 'notion') return config.notionInReviewStatus;

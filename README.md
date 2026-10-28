@@ -7,7 +7,7 @@
 
 **aidev** turns your tasks into merged code — automatically.
 
-It polls your task manager (ClickUp, Jira, Linear, Monday.com, Notion, Trello, or local markdown files), checks whether tasks are clear, runs your configured AI agent (aider, Claude, Cursor, Devin, and more) to implement them, pushes a branch, and moves the task to review.
+It polls your task manager (ClickUp, Jira, Linear, AGenda, Monday.com, Notion, Trello, or local markdown files), checks whether tasks are clear, runs your configured AI agent (aider, Claude, Cursor, Devin, and more) to implement them, pushes a branch, and moves the task to review.
 
 ```
 Task  →  AI implements  →  git push  →  "in review"  →  agent review  →  AI resolves code review comments

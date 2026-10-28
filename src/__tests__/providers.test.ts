@@ -8,6 +8,7 @@ import type { Config } from '../types';
 import { ClickUpProvider, getBlockedByFromClickUpDependencies } from '../providers/clickup';
 import { JiraProvider } from '../providers/jira';
 import { LinearProvider, getBlockedByFromLinearRelations } from '../providers/linear';
+import { AgendaProvider, getBlockedByFromAgendaRelations, mapAgendaJobStatus } from '../providers/agenda';
 import { MondayProvider, getBlockedByFromMondayColumnValues, getTagsFromMondayColumnValues } from '../providers/monday';
 import { NotionProvider } from '../providers/notion';
 import { TrelloProvider } from '../providers/trello';
@@ -2542,5 +2543,491 @@ describe('getTagsFromMondayColumnValues', () => {
       'tags_col',
     );
     assert.deepEqual(tags, ['qelos', 'isaac-consult']);
+  });
+});
+
+// ─── AgendaProvider ─────────────────────────────────────────────────────────
+
+const baseAgendaConfig = {
+  agendaUrl: 'http://127.0.0.1:7420',
+  agendaToken: 'ag_test',
+  agendaWorkspaceId: '01a15e5d-1c71-71fd-a9b2-e7743a9b8739',
+  agendaPendingStatus: 'Pending',
+  agendaInReviewStatus: 'In Review',
+  commentPrefix: '[aidev-sendfax]',
+  assigneeTag: '',
+} as unknown as Config;
+
+const AGENDA_WS = '01a15e5d-1c71-71fd-a9b2-e7743a9b8739';
+const AGENDA_TEAM = 'team-sen';
+
+function agendaBootstrap() {
+  return {
+    teams: [{ id: AGENDA_TEAM, key: 'SEN', name: 'SendFax', workspace_id: AGENDA_WS, position: 0 }],
+    states: [
+      { id: 's-backlog', team_id: AGENDA_TEAM, name: 'Backlog', type: 'backlog' },
+      { id: 's-todo', team_id: AGENDA_TEAM, name: 'Todo', type: 'unstarted' },
+      { id: 's-progress', team_id: AGENDA_TEAM, name: 'In Progress', type: 'started' },
+      { id: 's-review', team_id: AGENDA_TEAM, name: 'In Review', type: 'started' },
+      { id: 's-done', team_id: AGENDA_TEAM, name: 'Done', type: 'completed' },
+    ],
+    labels: [
+      { id: 'l-accepted', name: 'accepted' },
+      { id: 'l-review', name: 'agent review' },
+    ],
+  };
+}
+
+function agendaIssue(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'issue-72',
+    identifier: 'SEN-72',
+    team_id: AGENDA_TEAM,
+    title: 'Admin Dashboard',
+    description: 'Add a tab named Agenda to the admin dashboard.',
+    state_id: 's-todo',
+    priority: 2,
+    label_ids: ['l-accepted'],
+    parent_id: null,
+    workspace_id: AGENDA_WS,
+    updated_at: '2026-10-28T15:00:00.000Z',
+    comments: [],
+    relations: [],
+    ...overrides,
+  };
+}
+
+function agendaJob(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'job-1',
+    issue_id: 'issue-72',
+    identifier: 'SEN-72',
+    issue_title: 'Admin Dashboard',
+    workspace_id: AGENDA_WS,
+    kind: 'task',
+    requested_text: '@aidev now remove this test tab from the admin',
+    status: 'queued',
+    claimed_by: null,
+    branch: null,
+    created_at: '2026-10-28T15:53:09.298Z',
+    updated_at: '2026-10-28T15:53:09.298Z',
+    project_path: '/Users/adigoldstein/Documents/MY CODING PROJECTS/SendFax.me',
+    ...overrides,
+  };
+}
+
+interface AgendaCall {
+  method: string;
+  path: string;
+  body?: Record<string, unknown>;
+  headers: Record<string, string>;
+}
+
+/** Fake AGenda server: records every call, answers from a small route table. */
+function mockAgenda(opts: {
+  jobs?: Array<Record<string, unknown>>;
+  issue?: Record<string, unknown>;
+  reviewIssues?: Array<Record<string, unknown>>;
+  onReport?: (body: Record<string, unknown>) => Record<string, unknown>;
+}) {
+  const calls: AgendaCall[] = [];
+  let jobs = opts.jobs ?? [];
+  mock.method(globalThis, 'fetch', async (url: string | URL | Request, init?: RequestInit) => {
+    const u = new URL(String(url));
+    const method = (init?.method || 'GET').toUpperCase();
+    const body = init?.body ? (JSON.parse(init.body as string) as Record<string, unknown>) : undefined;
+    const headers = (init?.headers || {}) as Record<string, string>;
+    calls.push({ method, path: u.pathname + u.search, body, headers });
+
+    if (u.pathname === '/api/bootstrap') return jsonResponse(agendaBootstrap());
+    if (u.pathname === '/api/aidev/jobs') {
+      const statuses = (u.searchParams.get('status') || '').split(',').filter(Boolean);
+      const issue = u.searchParams.get('issue');
+      const items = jobs.filter(
+        (j) =>
+          (statuses.length === 0 || statuses.includes(j.status as string)) &&
+          (!issue || j.identifier === issue || j.issue_id === issue),
+      );
+      return jsonResponse({ items });
+    }
+    const claim = u.pathname.match(/^\/api\/aidev\/jobs\/([^/]+)\/claim$/);
+    if (claim && method === 'POST') {
+      const job = jobs.find((j) => j.id === claim[1]);
+      if (!job) return { ok: false, status: 404, statusText: 'Not Found', text: async () => '{"error":{"message":"job not found"}}' };
+      if (job.status !== 'queued') return { ok: false, status: 409, statusText: 'Conflict', text: async () => '{"error":{"message":"job is claimed"}}' };
+      job.status = 'claimed';
+      job.claimed_by = body?.by;
+      return jsonResponse(job);
+    }
+    const report = u.pathname.match(/^\/api\/aidev\/jobs\/([^/]+)\/report$/);
+    if (report && method === 'POST') {
+      const job = jobs.find((j) => j.id === report[1]);
+      if (!job) return { ok: false, status: 404, statusText: 'Not Found', text: async () => '{"error":{"message":"job not found"}}' };
+      job.status = body?.status;
+      return jsonResponse(opts.onReport ? opts.onReport(body!) : job);
+    }
+    if (u.pathname === '/api/issues' && method === 'GET') return jsonResponse({ items: opts.reviewIssues ?? [] });
+    if (u.pathname === '/api/issues' && method === 'POST') {
+      return jsonResponse({ ...agendaIssue(), id: 'issue-new', identifier: 'SEN-99', title: body?.title });
+    }
+    const comments = u.pathname.match(/^\/api\/issues\/([^/]+)\/comments$/);
+    if (comments && method === 'POST') return jsonResponse({ id: 'c-new', body: body?.body });
+    const issue = u.pathname.match(/^\/api\/issues\/([^/]+)$/);
+    if (issue) {
+      if (!opts.issue || (opts.issue.identifier !== decodeURIComponent(issue[1]) && opts.issue.id !== decodeURIComponent(issue[1]))) {
+        return { ok: false, status: 404, statusText: 'Not Found', text: async () => '{"error":{"code":"not_found","message":"issue not found"}}' };
+      }
+      if (method === 'PATCH') return jsonResponse({ ...opts.issue, ...body });
+      return jsonResponse(opts.issue);
+    }
+    return { ok: false, status: 500, statusText: 'unexpected', text: async () => `no route for ${method} ${u.pathname}` };
+  });
+  return { calls, setJobs: (next: Array<Record<string, unknown>>) => { jobs = next; } };
+}
+
+describe('mapAgendaJobStatus', () => {
+  it('maps queued jobs to open and queued replies to the pending status', () => {
+    assert.equal(mapAgendaJobStatus({ status: 'queued', kind: 'task' }, 'Pending'), 'open');
+    assert.equal(mapAgendaJobStatus({ status: 'queued', kind: 'push' }, 'Pending'), 'open');
+    assert.equal(mapAgendaJobStatus({ status: 'queued', kind: 'reply' }, 'Pending'), 'Pending');
+  });
+
+  it('maps claimed and running to in progress, needs_input to a skipped status, terminal statuses to done/failed/cancelled', () => {
+    assert.equal(mapAgendaJobStatus({ status: 'claimed', kind: 'task' }, 'Pending'), 'in progress');
+    assert.equal(mapAgendaJobStatus({ status: 'running', kind: 'task' }, 'Pending'), 'in progress');
+    assert.equal(mapAgendaJobStatus({ status: 'needs_input', kind: 'task' }, 'Pending'), 'needs input');
+    assert.equal(mapAgendaJobStatus({ status: 'done', kind: 'task' }, 'Pending'), 'done');
+    assert.equal(mapAgendaJobStatus({ status: 'failed', kind: 'task' }, 'Pending'), 'failed');
+    assert.equal(mapAgendaJobStatus({ status: 'canceled', kind: 'task' }, 'Pending'), 'cancelled');
+  });
+});
+
+describe('getBlockedByFromAgendaRelations', () => {
+  it('collects incoming "blocks" relations as blockers', () => {
+    const blockedBy = getBlockedByFromAgendaRelations([
+      { type: 'blocks', direction: 'incoming', issue: { identifier: 'SEN-5' } },
+      { type: 'blocks', direction: 'outgoing', issue: { identifier: 'SEN-99' } },
+      { type: 'related', direction: 'incoming', issue: { identifier: 'SEN-7' } },
+    ]);
+    assert.deepEqual(blockedBy, ['SEN-5']);
+  });
+
+  it('returns an empty list without relations', () => {
+    assert.deepEqual(getBlockedByFromAgendaRelations(undefined), []);
+  });
+});
+
+describe('AgendaProvider.fetchTasks', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('lists open @aidev jobs of the workspace as tasks with the issue identifier as id', async () => {
+    const { calls } = mockAgenda({ jobs: [agendaJob()], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    const tasks = await provider.fetchTasks();
+
+    assert.equal(tasks.length, 1);
+    assert.equal(tasks[0].id, 'SEN-72');
+    assert.equal(tasks[0].name, 'Admin Dashboard');
+    assert.equal(tasks[0].status, 'open');
+    assert.equal(tasks[0].url, 'http://127.0.0.1:7420/issue/SEN-72');
+    assert.deepEqual(tasks[0].tags, ['accepted']);
+    assert.equal(tasks[0].priority, 2);
+    assert.equal(tasks[0].sourceListId, AGENDA_WS);
+    assert.ok(tasks[0].description.startsWith('Add a tab named Agenda'));
+    assert.ok(tasks[0].description.includes('@aidev now remove this test tab'), 'comment request is appended');
+
+    const jobsCall = calls.find((c) => c.path.startsWith('/api/aidev/jobs?'));
+    assert.ok(jobsCall);
+    assert.ok(jobsCall.path.includes('status=queued%2Cclaimed%2Crunning%2Cneeds_input'));
+    assert.ok(jobsCall.path.includes(`workspace_id=${AGENDA_WS}`));
+    assert.equal(jobsCall.headers.Authorization, 'Bearer ag_test');
+    assert.equal(jobsCall.headers['X-Agenda-Client'], 'aidev-dispatcher');
+  });
+
+  it('reports a queued reply job as pending so the conversation is re-read', async () => {
+    mockAgenda({ jobs: [agendaJob({ kind: 'reply', requested_text: 'Yes, remove it' })], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    const tasks = await provider.fetchTasks();
+    assert.equal(tasks[0].status, 'Pending');
+  });
+
+  it('does not repeat the request when it is already the issue description', async () => {
+    mockAgenda({
+      jobs: [agendaJob({ requested_text: '@aidev build it' })],
+      issue: agendaIssue({ description: '@aidev build it' }),
+    });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    const tasks = await provider.fetchTasks();
+    assert.equal(tasks[0].description, '@aidev build it');
+  });
+
+  it('resolves a workspace given by name', async () => {
+    const { calls } = mockAgenda({ jobs: [], issue: agendaIssue() });
+    mock.method(globalThis, 'fetch', async (url: string | URL | Request) => {
+      const u = new URL(String(url));
+      calls.push({ method: 'GET', path: u.pathname + u.search, headers: {} });
+      if (u.pathname === '/api/bootstrap' && !u.searchParams.get('workspace_id')) {
+        return jsonResponse({ ...agendaBootstrap(), workspaces: [{ id: AGENDA_WS, name: 'SendFax' }] });
+      }
+      return jsonResponse({ items: [] });
+    });
+    const provider = new AgendaProvider({ ...baseAgendaConfig, agendaWorkspaceId: 'sendfax' } as unknown as Config);
+    await provider.fetchTasks();
+    assert.ok(calls.some((c) => c.path === '/api/bootstrap'));
+    assert.ok(calls.some((c) => c.path.includes(`workspace_id=${AGENDA_WS}`)));
+  });
+
+  it('fails clearly when the workspace is not configured', async () => {
+    mockAgenda({ jobs: [] });
+    const provider = new AgendaProvider({ ...baseAgendaConfig, agendaWorkspaceId: '' } as unknown as Config);
+    await assert.rejects(() => provider.fetchTasks(), /AGENDA_WORKSPACE_ID is not set/);
+  });
+});
+
+describe('AgendaProvider.fetchTaskById', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('uses the issue workflow state when the issue has no open job (blockers)', async () => {
+    mockAgenda({ jobs: [agendaJob({ status: 'done' })], issue: agendaIssue({ state_id: 's-done' }) });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    const task = await provider.fetchTaskById('SEN-72');
+    assert.ok(task);
+    assert.equal(task.status, 'Done');
+  });
+
+  it('returns null when the issue does not exist', async () => {
+    mockAgenda({ jobs: [], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    assert.equal(await provider.fetchTaskById('SEN-999'), null);
+  });
+
+  it('populates blockedBy from incoming blocks relations', async () => {
+    mockAgenda({
+      jobs: [agendaJob()],
+      issue: agendaIssue({ relations: [{ type: 'blocks', direction: 'incoming', issue: { identifier: 'SEN-3' } }] }),
+    });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    const task = await provider.fetchTaskById('SEN-72');
+    assert.ok(task);
+    assert.deepEqual(task.blockedBy, ['SEN-3']);
+  });
+});
+
+describe('AgendaProvider.fetchTasksByStatus', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('adds issues sitting in the in-review workflow state when asked for the review status', async () => {
+    const { calls } = mockAgenda({
+      jobs: [agendaJob()],
+      issue: agendaIssue(),
+      reviewIssues: [agendaIssue({ id: 'issue-70', identifier: 'SEN-70', title: 'Old task', state_id: 's-review', label_ids: ['l-review'] })],
+    });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    const tasks = await provider.fetchTasksByStatus(['In Review']);
+    assert.deepEqual(tasks.map((t) => t.id), ['SEN-70']);
+    assert.equal(tasks[0].status, 'In Review');
+    assert.deepEqual(tasks[0].tags, ['agent review']);
+    const listCall = calls.find((c) => c.path.startsWith('/api/issues?'));
+    assert.ok(listCall);
+    assert.ok(listCall.path.includes('state_id=s-review'));
+  });
+
+  it('filters open jobs by status without touching the issue list', async () => {
+    const { calls } = mockAgenda({ jobs: [agendaJob(), agendaJob({ id: 'job-2', identifier: 'SEN-73', issue_id: 'issue-73', status: 'running' })], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    const tasks = await provider.fetchTasksByStatus(['open']);
+    assert.equal(tasks.length, 1);
+    assert.equal(tasks[0].status, 'open');
+    assert.ok(!calls.some((c) => c.path.startsWith('/api/issues?')));
+  });
+});
+
+describe('AgendaProvider.getComments', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('returns issue comments sorted by date and marks AIdev server comments with the prefix', async () => {
+    mockAgenda({
+      jobs: [],
+      issue: agendaIssue({
+        comments: [
+          { id: 'c2', body: '@aidev merge', created_at: '2026-10-28T16:07:30.641Z', author: 'me', actor: null },
+          { id: 'c1', body: '[aidev-sendfax] Starting implementation on branch `SEN-72/admin`', created_at: '2026-10-28T15:55:00.000Z', author: 'aidev-pi', actor: 'aidev-pi' },
+          { id: 'c0', body: '**Question from AIdev:** Which tab?', created_at: '2026-10-28T15:54:00.000Z', author: 'AIdev', actor: 'AIdev' },
+        ],
+      }),
+    });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    const comments = await provider.getComments('SEN-72');
+    assert.deepEqual(comments.map((c) => c.id), ['c0', 'c1', 'c2']);
+    assert.ok(comments[0].text.startsWith('[aidev-sendfax] '), 'AIdev actor comment gets the prefix');
+    assert.equal(comments[1].text, '[aidev-sendfax] Starting implementation on branch `SEN-72/admin`');
+    assert.equal(comments[2].text, '@aidev merge');
+    assert.equal(comments[2].author, 'me');
+    assert.equal(comments[2].date, new Date('2026-10-28T16:07:30.641Z').getTime());
+  });
+});
+
+describe('AgendaProvider.postComment', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('posts a plain comment on the issue', async () => {
+    const { calls } = mockAgenda({ jobs: [agendaJob()], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await provider.postComment('SEN-72', '[aidev-sendfax] Starting implementation');
+    const call = calls.find((c) => c.method === 'POST' && c.path === '/api/issues/SEN-72/comments');
+    assert.ok(call);
+    assert.deepEqual(call.body, { body: '[aidev-sendfax] Starting implementation' });
+  });
+});
+
+describe('AgendaProvider.updateStatus — job queue', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('"in progress" claims a queued job and reports it running', async () => {
+    const { calls } = mockAgenda({ jobs: [agendaJob()], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await provider.updateStatus('SEN-72', 'in progress');
+    const claim = calls.find((c) => c.path === '/api/aidev/jobs/job-1/claim');
+    assert.ok(claim, 'claims the job');
+    assert.ok(typeof claim.body?.by === 'string' && (claim.body.by as string).startsWith('aidev@'));
+    const report = calls.find((c) => c.path === '/api/aidev/jobs/job-1/report');
+    assert.ok(report);
+    assert.deepEqual(report.body, { status: 'running' });
+    assert.ok(!calls.some((c) => c.method === 'PATCH'), 'does not touch the issue state directly');
+  });
+
+  it('does not re-report a job that is already running', async () => {
+    const { calls } = mockAgenda({ jobs: [agendaJob({ status: 'running' })], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await provider.updateStatus('SEN-72', 'in progress');
+    assert.ok(!calls.some((c) => c.path.endsWith('/claim') || c.path.endsWith('/report')));
+  });
+
+  it('pending status reports needs_input', async () => {
+    const { calls } = mockAgenda({ jobs: [agendaJob({ status: 'claimed' })], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await provider.updateStatus('SEN-72', 'Pending');
+    const report = calls.find((c) => c.path === '/api/aidev/jobs/job-1/report');
+    assert.ok(report);
+    assert.deepEqual(report.body, { status: 'needs_input' });
+  });
+
+  it('in-review status reports done (case-insensitive)', async () => {
+    const { calls } = mockAgenda({ jobs: [agendaJob({ status: 'running' })], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await provider.updateStatus('SEN-72', 'in review');
+    const report = calls.find((c) => c.path === '/api/aidev/jobs/job-1/report');
+    assert.ok(report);
+    assert.deepEqual(report.body, { status: 'done' });
+  });
+
+  it('does not re-claim a job another dispatcher already holds', async () => {
+    const { calls } = mockAgenda({ jobs: [agendaJob({ status: 'claimed', claimed_by: 'someone else' })], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await provider.updateStatus('SEN-72', 'in progress');
+    assert.ok(!calls.some((c) => c.path.endsWith('/claim')), 'no claim call');
+    const report = calls.find((c) => c.path === '/api/aidev/jobs/job-1/report');
+    assert.ok(report);
+    assert.deepEqual(report.body, { status: 'running' });
+  });
+
+  it('surfaces the 409 from a claim that lost the race', async () => {
+    mockAgenda({ jobs: [agendaJob()], issue: agendaIssue() });
+    mock.method(globalThis, 'fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      const u = new URL(String(url));
+      if (u.pathname.endsWith('/claim')) {
+        return { ok: false, status: 409, statusText: 'Conflict', text: async () => JSON.stringify({ error: { code: 'conflict', message: 'job is claimed (claimed by other)' } }) };
+      }
+      if (u.pathname === '/api/aidev/jobs') return jsonResponse({ items: [agendaJob()] });
+      return jsonResponse({});
+    });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await assert.rejects(() => provider.updateStatus('SEN-72', 'in progress'), /AGenda API error 409: job is claimed/);
+  });
+});
+
+describe('AgendaProvider.updateStatus — workflow state fallback', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('sets the issue state by name when there is no open job', async () => {
+    const { calls } = mockAgenda({ jobs: [agendaJob({ status: 'done' })], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await provider.updateStatus('SEN-72', 'Backlog');
+    const patch = calls.find((c) => c.method === 'PATCH');
+    assert.ok(patch);
+    assert.equal(patch.path, '/api/issues/issue-72');
+    assert.deepEqual(patch.body, { state_id: 's-backlog' });
+  });
+
+  it('falls back to the state type when no state name matches ("done" → completed)', async () => {
+    const { calls } = mockAgenda({ jobs: [], issue: agendaIssue({ state_id: 's-review' }) });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await provider.updateStatus('SEN-72', 'done');
+    const patch = calls.find((c) => c.method === 'PATCH');
+    assert.ok(patch);
+    assert.deepEqual(patch.body, { state_id: 's-done' });
+  });
+
+  it('skips the PATCH when the issue is already in that state', async () => {
+    const { calls } = mockAgenda({ jobs: [], issue: agendaIssue({ state_id: 's-done' }) });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await provider.updateStatus('SEN-72', 'Done');
+    assert.ok(!calls.some((c) => c.method === 'PATCH'));
+  });
+
+  it('throws a helpful error when nothing matches', async () => {
+    mockAgenda({ jobs: [], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await assert.rejects(() => provider.updateStatus('SEN-72', 'Nowhere'), /no workflow state matching "Nowhere"/);
+  });
+});
+
+describe('AgendaProvider.fetchAvailableStatuses', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('returns the workflow state names', async () => {
+    mockAgenda({ jobs: [] });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    const statuses = await provider.fetchAvailableStatuses();
+    assert.deepEqual(statuses, ['Backlog', 'Todo', 'In Progress', 'In Review', 'Done']);
+  });
+});
+
+describe('AgendaProvider.addTag / removeTag', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('patches labels by name', async () => {
+    const { calls } = mockAgenda({ jobs: [], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await provider.addTag('SEN-72', 'agent review');
+    await provider.removeTag('SEN-72', 'accepted');
+    const patches = calls.filter((c) => c.method === 'PATCH');
+    assert.deepEqual(patches.map((c) => c.body), [{ add_labels: ['agent review'] }, { remove_labels: ['accepted'] }]);
+  });
+
+  it('surfaces the server error for keys that may not change labels', async () => {
+    mock.method(globalThis, 'fetch', async () => ({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      text: async () => JSON.stringify({ error: { code: 'forbidden', message: "dispatcher keys can only change an issue's state" } }),
+    }));
+    const provider = new AgendaProvider(baseAgendaConfig);
+    await assert.rejects(() => provider.addTag('SEN-72', 'agent review'), /AGenda API error 403: dispatcher keys can only change/);
+  });
+});
+
+describe('AgendaProvider.createTask', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('creates an issue in the workspace team and returns identifier and url', async () => {
+    const { calls } = mockAgenda({ jobs: [], issue: agendaIssue() });
+    const provider = new AgendaProvider(baseAgendaConfig);
+    const result = await provider.createTask({ title: 'Sub task', description: 'Do it', tags: ['planning'], priority: 3 });
+    assert.equal(result.id, 'SEN-99');
+    assert.equal(result.url, 'http://127.0.0.1:7420/issue/SEN-99');
+    const create = calls.find((c) => c.method === 'POST' && c.path === '/api/issues');
+    assert.ok(create);
+    assert.deepEqual(create.body, { team_id: AGENDA_TEAM, title: 'Sub task', description: 'Do it', priority: 3, labels: ['planning'] });
   });
 });

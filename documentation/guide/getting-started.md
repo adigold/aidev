@@ -22,10 +22,10 @@ aidev init
 The wizard asks for your task provider credentials, git settings, and preferred AI agents.
 
 ::: tip Init wizard coverage
-`aidev init` supports **ClickUp, Jira, Linear, Local, Monday.com, and Trello**. For **Notion**, create `.env.aidev` manually using `.env.aidev.example` as a template (see [Configuration](/guide/configuration)).
+`aidev init` supports **AGenda, ClickUp, Jira, Linear, Local, Monday.com, and Trello**. For **Notion**, create `.env.aidev` manually using `.env.aidev.example` as a template (see [Configuration](/guide/configuration)).
 :::
 
-For ClickUp, API keys can be left blank if they are already set as environment variables in your shell. For Jira, Linear, Monday.com, and Trello, the wizard requires credentials to be entered directly — to use shell env vars instead, edit `.env.aidev` after init and remove the values you want read from your environment.
+For ClickUp, API keys can be left blank if they are already set as environment variables in your shell. For AGenda, Jira, Linear, Monday.com, and Trello, the wizard requires credentials to be entered directly — to use shell env vars instead, edit `.env.aidev` after init and remove the values you want read from your environment.
 
 ## First run
 

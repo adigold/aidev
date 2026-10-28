@@ -15,10 +15,10 @@ function resolveLocalIcon(icon: string): string | undefined {
 }
 
 describe('providers data', () => {
-  it('lists all seven implemented providers', () => {
-    expect(providers).toHaveLength(7);
+  it('lists all eight implemented providers', () => {
+    expect(providers).toHaveLength(8);
     expect(providers.map((p) => p.id).sort()).toEqual(
-      ['clickup', 'jira', 'linear', 'local', 'monday', 'notion', 'trello'].sort(),
+      ['agenda', 'clickup', 'jira', 'linear', 'local', 'monday', 'notion', 'trello'].sort(),
     );
   });
 

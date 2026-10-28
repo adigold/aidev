@@ -119,3 +119,16 @@ describe('resolveStatus', () => {
     assert.equal(resolveStatus(config, 'custom status'), 'custom status');
   });
 });
+
+describe('resolveStatus — agenda provider', () => {
+  it('resolves pending and review to the configured AGenda statuses', () => {
+    const config = baseConfig({
+      provider: 'agenda',
+      agendaPendingStatus: 'Waiting',
+      agendaInReviewStatus: 'Review me',
+    } as Partial<Config>);
+    assert.equal(resolveStatus(config, 'pending'), 'Waiting');
+    assert.equal(resolveStatus(config, 'review'), 'Review me');
+    assert.equal(resolveStatus(config, 'open'), 'open');
+  });
+});

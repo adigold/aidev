@@ -39,6 +39,7 @@ Each provider has its own env vars — see the dedicated pages:
 - [ClickUp](/guide/configuration/clickup)
 - [Jira](/guide/configuration/jira)
 - [Linear](/guide/configuration/linear)
+- [AGenda](/guide/configuration/agenda)
 - [Monday.com](/guide/configuration/monday)
 - [Notion](/guide/configuration/notion)
 - [Trello](/guide/configuration/trello)

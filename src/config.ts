@@ -186,6 +186,8 @@ export function loadConfig(customEnvPath?: string): Config {
   const required =
     provider === 'local'
       ? []
+      : provider === 'agenda'
+        ? ['AGENDA_TOKEN', 'AGENDA_WORKSPACE_ID']
       : provider === 'jira'
         ? ['JIRA_BASE_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN', 'JIRA_PROJECT']
         : provider === 'linear'
@@ -284,6 +286,11 @@ export function loadConfig(customEnvPath?: string): Config {
     linearLabel: process.env.LINEAR_LABEL || folderName,
     linearPendingStatus: process.env.LINEAR_PENDING_STATUS || 'Pending',
     linearInReviewStatus: process.env.LINEAR_IN_REVIEW_STATUS || 'In Review',
+    agendaUrl: process.env.AGENDA_URL || 'http://127.0.0.1:7420',
+    agendaToken: process.env.AGENDA_TOKEN || '',
+    agendaWorkspaceId: process.env.AGENDA_WORKSPACE_ID || '',
+    agendaPendingStatus: process.env.AGENDA_PENDING_STATUS || 'Pending',
+    agendaInReviewStatus: process.env.AGENDA_IN_REVIEW_STATUS || 'In Review',
     mondayApiToken: process.env.MONDAY_API_TOKEN || '',
     mondayBoardId: process.env.MONDAY_BOARD_ID || '',
     mondayStatusColumnId: process.env.MONDAY_STATUS_COLUMN_ID || 'status',

@@ -173,7 +173,7 @@ interface ClickUpMember {
 }
 
 export interface Answers {
-  provider: 'clickup' | 'jira' | 'linear' | 'local' | 'monday' | 'trello';
+  provider: 'agenda' | 'clickup' | 'jira' | 'linear' | 'local' | 'monday' | 'trello';
   // ClickUp
   clickupApiKey: string;
   clickupTeamId: string;
@@ -194,6 +194,12 @@ export interface Answers {
   linearLabel: string;
   linearPendingStatus: string;
   linearInReviewStatus: string;
+  // AGenda
+  agendaUrl: string;
+  agendaToken: string;
+  agendaWorkspaceId: string;
+  agendaPendingStatus: string;
+  agendaInReviewStatus: string;
   // Monday
   mondayApiToken: string;
   mondayBoardId: string;
@@ -388,6 +394,15 @@ export function renderEnv(a: Answers): string {
             `JIRA_PENDING_STATUS=${envVal(a.jiraPendingStatus)}`,
             `JIRA_IN_REVIEW_STATUS=${envVal(a.jiraInReviewStatus)}`,
           ]
+        : a.provider === 'agenda'
+          ? [
+              `PROVIDER=agenda`,
+              line('AGENDA_URL', a.agendaUrl),
+              line('AGENDA_TOKEN', a.agendaToken),
+              line('AGENDA_WORKSPACE_ID', a.agendaWorkspaceId),
+              `AGENDA_PENDING_STATUS=${envVal(a.agendaPendingStatus)}`,
+              `AGENDA_IN_REVIEW_STATUS=${envVal(a.agendaInReviewStatus)}`,
+            ]
         : a.provider === 'linear'
           ? [
               `PROVIDER=linear`,
@@ -617,7 +632,7 @@ export async function initCommand(): Promise<void> {
 
     // ── Provider ─────────────────────────────────────────────
     section('Task provider');
-    const provider = await choose(rl, 'Which task provider do you use?', ['clickup', 'jira', 'linear', 'local', 'monday', 'trello'], existing.PROVIDER || 'clickup') as Answers['provider'];
+    const provider = await choose(rl, 'Which task provider do you use?', ['agenda', 'clickup', 'jira', 'linear', 'local', 'monday', 'trello'], existing.PROVIDER || 'clickup') as Answers['provider'];
 
     // Provider-specific config
     const globalEnvHint = hint('leave blank to use global env var');
@@ -642,6 +657,12 @@ export async function initCommand(): Promise<void> {
     let linearLabel = '';
     let linearPendingStatus = 'Backlog';
     let linearInReviewStatus = 'In Review';
+
+    let agendaUrl = '';
+    let agendaToken = '';
+    let agendaWorkspaceId = '';
+    let agendaPendingStatus = 'Pending';
+    let agendaInReviewStatus = 'In Review';
 
     let mondayApiToken = '';
     let mondayBoardId = '';
@@ -691,6 +712,22 @@ export async function initCommand(): Promise<void> {
       );
       jiraPendingStatus = await ask(rl, 'Pending status name', existing.JIRA_PENDING_STATUS || 'To Do');
       jiraInReviewStatus = await ask(rl, 'In-review status name', existing.JIRA_IN_REVIEW_STATUS || 'In Review');
+    } else if (provider === 'agenda') {
+      section('AGenda');
+      agendaUrl = await ask(
+        rl,
+        `AGenda server URL ${hint('e.g. http://127.0.0.1:7420')}`,
+        existing.AGENDA_URL || 'http://127.0.0.1:7420'
+      );
+      agendaToken = await ask(rl, `API key ${hint('dispatcher role')} ${globalEnvHint}`, existing.AGENDA_TOKEN || '', true);
+      agendaWorkspaceId = await ask(
+        rl,
+        `Workspace ${hint('workspace id or exact workspace name; one project per workspace')}`,
+        existing.AGENDA_WORKSPACE_ID || '',
+        true
+      );
+      agendaPendingStatus = await ask(rl, 'Pending status name', existing.AGENDA_PENDING_STATUS || 'Pending');
+      agendaInReviewStatus = await ask(rl, 'In-review status name', existing.AGENDA_IN_REVIEW_STATUS || 'In Review');
     } else if (provider === 'linear') {
       section('Linear');
       linearApiKey = await ask(rl, `API key ${globalEnvHint}`, existing.LINEAR_API_KEY || '', true);
@@ -1087,6 +1124,11 @@ export async function initCommand(): Promise<void> {
       linearLabel,
       linearPendingStatus,
       linearInReviewStatus,
+      agendaUrl,
+      agendaToken,
+      agendaWorkspaceId,
+      agendaPendingStatus,
+      agendaInReviewStatus,
       mondayApiToken,
       mondayBoardId,
       mondayStatusColumnId,

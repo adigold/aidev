@@ -56,6 +56,11 @@ const baseAnswers: Answers = {
   linearLabel: '',
   linearPendingStatus: '',
   linearInReviewStatus: '',
+  agendaUrl: '',
+  agendaToken: '',
+  agendaWorkspaceId: '',
+  agendaPendingStatus: '',
+  agendaInReviewStatus: '',
   mondayApiToken: '',
   mondayBoardId: '',
   mondayStatusColumnId: 'status',
@@ -437,6 +442,11 @@ function answersFromParsed(p: Record<string, string>, folderName = 'myproject'):
     linearLabel: p.LINEAR_LABEL || folderName,
     linearPendingStatus: p.LINEAR_PENDING_STATUS || 'Pending',
     linearInReviewStatus: p.LINEAR_IN_REVIEW_STATUS || 'In Review',
+    agendaUrl: p.AGENDA_URL || 'http://127.0.0.1:7420',
+    agendaToken: p.AGENDA_TOKEN || '',
+    agendaWorkspaceId: p.AGENDA_WORKSPACE_ID || '',
+    agendaPendingStatus: p.AGENDA_PENDING_STATUS || 'Pending',
+    agendaInReviewStatus: p.AGENDA_IN_REVIEW_STATUS || 'In Review',
     mondayApiToken: p.MONDAY_API_TOKEN || '',
     mondayBoardId: p.MONDAY_BOARD_ID || '',
     mondayStatusColumnId: p.MONDAY_STATUS_COLUMN_ID || 'status',
@@ -1104,5 +1114,49 @@ describe('ensureCursorignore', () => {
       assert.equal(lines.length, 2);
       assert.ok(lines.every((l) => l.startsWith('!/')));
     });
+  });
+});
+
+// ─── renderEnv AGenda provider ───────────────────────────────────────────────
+
+describe('renderEnv AGenda provider', () => {
+  it('writes PROVIDER=agenda and AGENDA_* keys', () => {
+    const out = renderEnv({
+      ...baseAnswers,
+      provider: 'agenda',
+      agendaUrl: 'http://127.0.0.1:7420',
+      agendaToken: 'ag_secret',
+      agendaWorkspaceId: 'SendFax',
+      agendaPendingStatus: 'Pending',
+      agendaInReviewStatus: 'In Review',
+    });
+    assert.ok(out.includes('PROVIDER=agenda'));
+    assert.ok(out.includes('AGENDA_URL=http://127.0.0.1:7420'));
+    assert.ok(out.includes('AGENDA_TOKEN=ag_secret'));
+    assert.ok(out.includes('AGENDA_WORKSPACE_ID=SendFax'));
+    assert.ok(out.includes('AGENDA_PENDING_STATUS=Pending'));
+    assert.ok(out.includes('AGENDA_IN_REVIEW_STATUS'));
+    assert.ok(out.includes('In Review'));
+    assert.ok(!out.includes('LINEAR_API_KEY='), 'must not render Linear keys for agenda');
+  });
+
+  it('re-rendering AGenda answers with parsed values produces identical output', () => {
+    const agendaAnswers: Answers = {
+      ...baseAnswers,
+      provider: 'agenda',
+      clickupApiKey: '',
+      clickupTeamId: '',
+      clickupTag: '',
+      clickupPendingStatus: '',
+      clickupInReviewStatus: '',
+      agendaUrl: 'http://127.0.0.1:7420',
+      agendaToken: 'ag_secret',
+      agendaWorkspaceId: 'SendFax',
+      agendaPendingStatus: 'Pending',
+      agendaInReviewStatus: 'In Review',
+    };
+    const first = renderEnv(agendaAnswers);
+    const second = renderEnv(answersFromParsed(dotenv.parse(first)));
+    assert.equal(second, first);
   });
 });

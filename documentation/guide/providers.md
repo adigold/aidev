@@ -9,6 +9,7 @@
 | ClickUp | ✅ Implemented | ✅ Interactive wizard |
 | Jira | ✅ Implemented | ✅ Interactive wizard |
 | Linear | ✅ Implemented | ✅ Interactive wizard |
+| AGenda | ✅ Implemented | ✅ Interactive wizard |
 | Monday.com | ✅ Implemented | ✅ Interactive wizard |
 | Local | ✅ Implemented | ✅ Interactive wizard |
 | Notion | ✅ Implemented | Manual `.env.aidev` config |
@@ -27,6 +28,10 @@ See [Jira configuration](/guide/configuration/jira).
 ## Linear {#linear}
 
 See [Linear configuration](/guide/configuration/linear).
+
+## AGenda {#agenda}
+
+See [AGenda configuration](/guide/configuration/agenda).
 
 ## Monday.com {#monday}
 

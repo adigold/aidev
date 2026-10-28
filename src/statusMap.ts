@@ -30,6 +30,8 @@ export function resolveStatus(config: Config, status: string): string {
       }
     case 'pending':
       switch (provider) {
+        case 'agenda':
+          return config.agendaPendingStatus || status;
         case 'clickup':
           return config.clickupPendingStatus || status;
         case 'jira':
@@ -45,6 +47,8 @@ export function resolveStatus(config: Config, status: string): string {
       }
     case 'review':
       switch (provider) {
+        case 'agenda':
+          return config.agendaInReviewStatus || status;
         case 'clickup':
           return config.clickupInReviewStatus || status;
         case 'jira':

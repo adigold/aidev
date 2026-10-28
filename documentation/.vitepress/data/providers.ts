@@ -37,6 +37,15 @@ export const providers: ProviderInfo[] = [
     blocking: 'native',
   },
   {
+    id: 'agenda',
+    name: 'AGenda',
+    status: 'implemented',
+    initSupport: true,
+    icon: '/icons/agenda.svg',
+    description: 'Open @aidev jobs from a self-hosted AGenda workspace.',
+    blocking: 'native',
+  },
+  {
     id: 'monday',
     name: 'Monday.com',
     status: 'implemented',

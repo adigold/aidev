@@ -32,6 +32,7 @@ export default defineConfig({
           { text: 'ClickUp', link: '/guide/configuration/clickup' },
           { text: 'Jira', link: '/guide/configuration/jira' },
           { text: 'Linear', link: '/guide/configuration/linear' },
+          { text: 'AGenda', link: '/guide/configuration/agenda' },
           { text: 'Monday.com', link: '/guide/configuration/monday' },
           { text: 'Notion', link: '/guide/configuration/notion' },
           { text: 'Trello', link: '/guide/configuration/trello' },

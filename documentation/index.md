@@ -24,7 +24,7 @@ hero:
 features:
   - icon: 🎯
     title: Multi-provider
-    details: ClickUp, Jira, Linear, Monday.com, Notion, Trello, or local markdown files.
+    details: ClickUp, Jira, Linear, AGenda, Monday.com, Notion, Trello, or local markdown files.
   - icon: 🤖
     title: Multi-agent
     details: Claude, Cursor, Devin, Aider, Codex, and more — with automatic fallback.
