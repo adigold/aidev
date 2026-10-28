@@ -1420,6 +1420,10 @@ async function implementTask(
       logger.error('Failed to push branch');
       return;
     }
+  } else if (!git.push(config.gitRemote, branchName)) {
+    // The agent committed its work itself: nothing left to commit, but the branch still has to reach GitHub.
+    logger.error('Failed to push branch');
+    return;
   }
 
   if (reviewThreads.length > 0) {
